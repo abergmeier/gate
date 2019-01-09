@@ -16,6 +16,8 @@
 
 package com.netflix.spinnaker.gate.controllers
 
+import com.netflix.spinnaker.gate.services.internal.EchoService
+import com.netflix.spinnaker.gate.services.internal.OrcaServiceSelector
 import com.netflix.spinnaker.gate.services.WebhookService
 import com.squareup.okhttp.mockwebserver.MockWebServer
 import org.springframework.http.MediaType
@@ -24,21 +26,59 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import retrofit.http.*
 import spock.lang.Specification
+
+class TestEchoService implements EchoService {
+
+  EchoService mock
+
+  @Override
+  Map webhooks(@Path('type') String type,
+               @Path('source') String source,
+               @Body Map event) {
+    mock.webhooks(type, source, event)
+  }
+
+  @Override
+  Map webhooks(@Path('type') String type,
+               @Path('source') String source,
+               @Body Map event,
+               @Header("X-Hub-Signature") String gitHubSignature,
+               @Header("X-Event-Key") String bitBucketEventType) {
+    mock.webhooks(type, source, event, gitHubSignature, bitBucketEventType)
+  }
+
+  Map validateCronExpression(@Query("cronExpression") String cronExpression) {
+    mock.validateCronExpression(cronExpression)
+  }
+
+  List<Map<String, String>> getPubsubSubscriptions() {
+    mock.getPubsubSubscriptions()
+  }
+
+  String postEvent(@Body Map event) {
+    mock.postEvent(event)
+  }
+}
 
 class WebhooksControllerSpec extends Specification {
 
   MockMvc mockMvc
 
   def server = new MockWebServer()
-  WebhookService webhookService = Mock(WebhookService)
+  EchoService echoMock = Mock(EchoService)
+  WebhookService webhookService
 
   void cleanup() {
     server.shutdown()
   }
 
   void setup() {
-    webhookService = Mock(WebhookService)
+    EchoService echoService = new TestEchoService(mock: echoMock)
+    OrcaServiceSelector orcaServiceSelector = Mock(OrcaServiceSelector)
+    webhookService = new WebhookService(echoService: echoService, orcaServiceSelector: orcaServiceSelector)
+
     server.start()
     mockMvc = MockMvcBuilders.standaloneSetup(new WebhookController(webhookService: webhookService)).build()
   }
@@ -55,7 +95,7 @@ class WebhooksControllerSpec extends Specification {
     )
 
     then:
-    1 * webhookService.webhooks('git', 'bitbucket', null, null, 'repo:refs_changed')
+    1 * echoMock.webhooks('git', 'bitbucket', null, null, 'repo:refs_changed')
   }
 
   void 'handles Bitbucket Server Ping'() {
@@ -68,6 +108,6 @@ class WebhooksControllerSpec extends Specification {
 
     then:
     result != null
-    1 * webhookService.webhooks('git', 'bitbucket', null)
+    1 * echoMock.webhooks('git', 'bitbucket', null)
   }
 }
